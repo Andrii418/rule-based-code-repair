@@ -1,12 +1,13 @@
 grammar JavaLite;
 
-program: classDecl EOF;
-classDecl: 'class' ID '{' member* '}';
+program: packageDecl? classDecl EOF;
+packageDecl: 'package' ID ('.' ID)* ';';
+classDecl: 'public'? 'class' ID '{' member* '}';
 member: fieldDecl | methodDecl;
-fieldDecl: type ID ('=' expr)? ';';
-methodDecl: type ID '(' params? ')' block;
+fieldDecl: 'public'? 'static'? type ID ('=' expr)? ';';
+methodDecl: 'public'? 'static'? type ID '(' params? ')' block;
 params: param (',' param)*;
-param: type ID;
+param: type ID ('[' ']')?;
 type: ('int' | 'double' | 'boolean' | 'String' | 'void') ('[' ']')?;
 block: '{' stmt* '}';
 stmt
@@ -14,6 +15,7 @@ stmt
     | type ID ('=' expr)? ';'
     | 'if' '(' expr ')' stmt ('else' stmt)?
     | 'while' '(' expr ')' stmt
+    | 'do' stmt 'while' '(' expr ')' ';'
     | 'for' '(' forInit? ';' expr? ';' expr? ')' stmt
     | 'return' expr? ';'
     | expr ';'
@@ -24,6 +26,7 @@ expr
     | expr '.' ID '(' args? ')'                    # MethodCallExpr
     | expr '.' ID                                 # MemberExpr
     | expr '[' expr ']'                            # IndexExpr
+    | expr ('++'|'--')                            # PostfixExpr
     | expr op=('*'|'/') expr                       # BinaryExpr
     | expr op=('+'|'-') expr                       # BinaryExpr
     | expr op=('<'|'<='|'>'|'>=') expr              # BinaryExpr

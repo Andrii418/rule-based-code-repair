@@ -6,7 +6,7 @@ import java.util.*;
 public final class RepairEngine {
     public record Change(String rule, int line, String explanation) {}
     public record Result(String source, List<Change> changes, List<String> diagnostics) {}
-    private record Issue(Token token, String message, boolean missingSemicolon) {}
+    private record Issue(Token token, String message) {}
     private record Parsed(JavaLiteParser.ProgramContext tree, CommonTokenStream tokens, List<Issue> issues) {}
 
     private Parsed parse(String source) {
@@ -18,8 +18,7 @@ public final class RepairEngine {
             @Override public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol,
                     int line, int column, String message, RecognitionException exception) {
                 Token token = (Token) offendingSymbol;
-                boolean semicolon = message.startsWith("missing ';' at");
-                issues.add(new Issue(token, line + ":" + (column + 1) + " " + message, semicolon));
+                issues.add(new Issue(token, line + ":" + (column + 1) + " " + message));
             }
         };
         lexer.removeErrorListeners(); lexer.addErrorListener(errors);
@@ -35,23 +34,51 @@ public final class RepairEngine {
             Parsed parsed = parse(source);
             if (!parsed.issues.isEmpty()) {
                 Issue first = parsed.issues.get(0);
-                if (!first.missingSemicolon) {
-                    diagnostics.add("Nieobsługiwany błąd składni: " + first.message);
-                    break;
+                Token previous = previousToken(parsed.tokens, first.token);
+                if (first.message.contains("missing ';' at") && previous != null) {
+                    int offset = previous.getStopIndex() + 1;
+                    String candidate = source.substring(0, offset) + ";" + source.substring(offset);
+                    if (parse(candidate).issues.size() < parsed.issues.size()) {
+                        source = candidate;
+                        changes.add(new Change("R01", previous.getLine(), "Dodano brakujący średnik."));
+                        continue;
+                    }
                 }
-                int index = first.token.getTokenIndex() - 1;
-                while (index >= 0 && parsed.tokens.get(index).getChannel() != Token.DEFAULT_CHANNEL) index--;
-                if (index < 0) { diagnostics.add(first.message); break; }
-                Token previous = parsed.tokens.get(index);
-                int offset = previous.getStopIndex() + 1;
-                String candidate = source.substring(0, offset) + ";" + source.substring(offset);
-                if (parse(candidate).issues.size() >= parsed.issues.size()) {
-                    diagnostics.add("R01 nie poprawiła składni: " + first.message);
-                    break;
+                if (first.token.getType() == Token.EOF
+                        && (first.message.contains("missing '}'") || first.message.contains("'}'"))) {
+                    String candidate = source + "\n}";
+                    if (parse(candidate).issues.size() < parsed.issues.size()) {
+                        source = candidate;
+                        changes.add(new Change("R02", first.token.getLine(), "Dodano brakującą klamrę na końcu pliku."));
+                        continue;
+                    }
                 }
-                source = candidate;
-                changes.add(new Change("R01", previous.getLine(), "Dodano brakujący średnik."));
-                continue;
+                Token doWhile = unclosedDoWhile(parsed.tokens);
+                if (doWhile != null) {
+                    int offset = doWhile.getStartIndex();
+                    String candidate = source.substring(0, offset) + "} " + source.substring(offset);
+                    if (parse(candidate).issues.size() < parsed.issues.size()) {
+                        source = candidate;
+                        changes.add(new Change("R02", doWhile.getLine(),
+                                "Dodano brakującą klamrę przed while w pętli do...while."));
+                        continue;
+                    }
+                }
+                if (previous != null && "-".equals(previous.getText())
+                        && ";".equals(first.token.getText())) {
+                    Token beforeMinus = previousToken(parsed.tokens, previous);
+                    if (beforeMinus != null && beforeMinus.getType() == JavaLiteLexer.ID) {
+                        String candidate = source.substring(0, previous.getStartIndex()) + "--"
+                                + source.substring(previous.getStopIndex() + 1);
+                        if (parse(candidate).issues.size() < parsed.issues.size()) {
+                            source = candidate;
+                            changes.add(new Change("R10", previous.getLine(), "Uzupełniono i-; do i--; (sprawdź zamiar)."));
+                            continue;
+                        }
+                    }
+                }
+                diagnostics.add("Nieobsługiwany błąd składni: " + first.message);
+                break;
             }
             FixFinder finder = new FixFinder(parsed.tokens);
             finder.visit(parsed.tree);
@@ -68,6 +95,43 @@ public final class RepairEngine {
         if (!finalParse.issues.isEmpty() && diagnostics.isEmpty())
             diagnostics.add("Pozostał błąd składni: " + finalParse.issues.get(0).message);
         return new Result(source, List.copyOf(changes), List.copyOf(diagnostics));
+    }
+
+    private static Token previousToken(CommonTokenStream tokens, Token token) {
+        int index = token.getTokenIndex() - 1;
+        while (index >= 0 && tokens.get(index).getChannel() != Token.DEFAULT_CHANNEL) index--;
+        return index >= 0 ? tokens.get(index) : null;
+    }
+
+    private static Token unclosedDoWhile(CommonTokenStream tokens) {
+        List<Token> visible = tokens.getTokens().stream()
+                .filter(t -> t.getChannel() == Token.DEFAULT_CHANNEL).toList();
+        for (int i = 0; i < visible.size(); i++) {
+            if (!"do".equals(visible.get(i).getText()) || i + 1 >= visible.size()
+                    || !"{".equals(visible.get(i + 1).getText())) continue;
+            int depth = 1;
+            for (int j = i + 2; j < visible.size(); j++) {
+                String text = visible.get(j).getText();
+                if ("{".equals(text)) depth++;
+                else if ("}".equals(text)) depth--;
+                if (depth == 0) break;
+                if (depth == 1 && "while".equals(text) && j + 1 < visible.size()
+                        && "(".equals(visible.get(j + 1).getText())) {
+                    int parentheses = 0;
+                    for (int k = j + 1; k < visible.size(); k++) {
+                        String part = visible.get(k).getText();
+                        if ("(".equals(part)) parentheses++;
+                        else if (")".equals(part)) parentheses--;
+                        if (parentheses == 0) {
+                            if (k + 1 < visible.size() && ";".equals(visible.get(k + 1).getText()))
+                                return visible.get(j);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private record Fix(TokenStreamRewriter rewriter, Change change) {}

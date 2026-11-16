@@ -30,4 +30,55 @@ class RepairEngineTest {
         assertTrue(r.changes().isEmpty());
         assertTrue(engine.repair(r.source()).changes().isEmpty());
     }
+
+    private static final String REALISTIC = "package javalearning;\n"
+            + "public class Main {\n"
+            + "  public static void main(String args[]) {\n"
+            + "    int i = 3;\n"
+            + "    do { System.out.println(i); i--; } while (i >= 1);\n"
+            + "  }\n"
+            + "}\n";
+
+    @Test void acceptsScreenshotStyleProgram() {
+        var result = engine.repair(REALISTIC);
+        assertEquals(REALISTIC, result.source());
+        assertTrue(result.diagnostics().isEmpty());
+    }
+
+    @Test void repairsMissingSemicolonInScreenshotStyleProgram() {
+        var result = engine.repair(REALISTIC.replace("int i = 3;", "int i = 3"));
+        assertTrue(result.source().contains("int i = 3;"));
+        assertTrue(result.diagnostics().isEmpty(), result.diagnostics().toString());
+    }
+
+    @Test void repairsMissingFinalBrace() {
+        var result = engine.repair(REALISTIC.substring(0, REALISTIC.lastIndexOf('}')));
+        assertTrue(result.source().trim().endsWith("}"));
+        assertTrue(result.changes().stream().anyMatch(c -> c.rule().equals("R02")), result.toString());
+        assertTrue(result.diagnostics().isEmpty(), result.diagnostics().toString());
+    }
+
+    @Test void repairsSingleMinusInDecrement() {
+        var result = engine.repair(REALISTIC.replace("i--;", "i-;"));
+        assertTrue(result.source().contains("i--;"));
+        assertTrue(result.changes().stream().anyMatch(c -> c.rule().equals("R10")));
+        assertTrue(result.diagnostics().isEmpty(), result.diagnostics().toString());
+    }
+
+    @Test void repairsThreeErrorsTogether() {
+        String input = REALISTIC.replace("int i = 3;", "int i = 3")
+                .replace("i--;", "i-;");
+        input = input.substring(0, input.lastIndexOf('}'));
+        var result = engine.repair(input);
+        assertTrue(result.source().contains("int i = 3;"), result.toString());
+        assertTrue(result.source().contains("i--;"), result.toString());
+        assertTrue(result.changes().stream().anyMatch(c -> c.rule().equals("R02")), result.toString());
+        assertTrue(result.diagnostics().isEmpty(), result.diagnostics().toString());
+    }
+
+    @Test void repairsMissingDoBlockBrace() {
+        var result = engine.repair(REALISTIC.replace("i--; } while", "i--; while"));
+        assertTrue(result.source().contains("i--; } while"), result.toString());
+        assertTrue(result.diagnostics().isEmpty(), result.diagnostics().toString());
+    }
 }
