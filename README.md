@@ -32,13 +32,15 @@ It writes `examples/fixed.java` and prints the applied rules. The quoted argumen
 | Rule | Example | Repair |
 | --- | --- | --- |
 | R01 | `int x = 1` before the next statement | insert `;` |
+| R02 | missing final `}`, or missing `}` before the final `while` of a `do...while` loop | insert `}` |
 | R03 | `if (x = 5)` | `if (x == 5)` |
 | R04 | `a == b` when both are declared `String` | `a.equals(b)` |
 | R05 | `i <= arr.length` in a loop condition when `arr` is declared as an array | `i < arr.length` |
+| R10 | `i-;` after a variable name | `i--;` with a review note |
 
 ## Scope and limitations
 
-JavaLite supports one class, fields, methods, primitive and String types, one-dimensional arrays, basic expressions, blocks, if/else, while, for, return, and calls. This is a teaching grammar, not a full Java parser. Type lookup is simple and does not model nested scopes or shadowing. R04 does not handle `null` specially. R05 is a suggested repair for typical array traversal; it does not prove the programmer's intent. R03 may change intended assignment semantics. Review every reported change before using repaired code.
+JavaLite supports an optional package declaration, one public or package-private class, fields, public/static methods, primitive and String types, one-dimensional arrays (including `String args[]`), basic expressions, blocks, if/else, while, do/while, for, return, calls, and `++`/`--`. This is a teaching grammar, not a full Java parser. Type lookup is simple and does not model nested scopes or shadowing. R02 handles a final missing brace and one specific missing brace in `do...while`; it cannot infer every missing brace inside a program. R10 only handles the narrow `name-;` typo; `i-` by itself is ambiguous. R04 does not handle `null` specially. R05 is a suggested repair for typical array traversal; it does not prove the programmer's intent. R03 may change intended assignment semantics. Review every reported change before using repaired code.
 
 ## Project layout
 
